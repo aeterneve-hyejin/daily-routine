@@ -103,6 +103,11 @@ input[type=text],input[type=url],input[type=time],input[type=number],select{font
 .paper canvas{display:block;width:100%;height:380px;touch-action:none}
 .paper .hint{position:absolute;left:16px;top:8px;font-family:var(--hand);color:#b4ad9b;font-size:20px;pointer-events:none}
 .paper img{display:block;width:100%}
+.paper textarea{display:block;width:100%;min-height:380px;border:0;resize:vertical;background:transparent;color:var(--ink);font-family:var(--hand);font-size:22px;line-height:36px;padding:0 16px 12px;outline:none}
+.paper .note-view{white-space:pre-wrap;font-family:var(--hand);font-size:22px;line-height:36px;color:var(--ink);padding:0 16px 12px;min-height:72px}
+.tabs{display:inline-flex;background:var(--soft);border-radius:10px;padding:3px;gap:2px}
+.tabs button{border:0;background:transparent;min-height:38px;padding:6px 14px;border-radius:8px}
+.tabs button[aria-pressed="true"]{background:var(--bg);box-shadow:0 1px 3px rgba(0,0,0,.12);font-weight:700}
 .save-state{font-size:13px;color:var(--muted);margin-left:auto}
 .sessions{display:flex;flex-wrap:wrap;gap:6px}
 .focus-bar{display:flex;align-items:center;gap:12px}
@@ -195,7 +200,7 @@ const DEFAULT_SET={dreamAmSc:"드림보드 아침",dreamNoonSc:"드림보드 점
 const scBtn=(name,label,cls="btn")=>name?`<a class="${cls}" href="shortcuts://run-shortcut?name=${encodeURIComponent(name)}">${label}</a>`:`<button class="btn" data-act="openSettings">⚡ 단축어 이름 넣기</button>`;
 /* v2: 명상 5분 + 명상 영상 링크 (이전 설정에도 한 번 적용) */
 function migrate(){const v=S.v||0;if(v>=4)return;if(v<2){S.meditateMin=5;S.meditateUrl=S.meditateUrl||DEFAULT_SET.meditateUrl}if(v<3)S.stretchMin=Math.max(30,Number(S.stretchMin)||0);["dreamAmSc","dreamNoonSc","dreamEveSc","diarySc","yes24Sc"].forEach(k=>{if(!S[k])S[k]=DEFAULT_SET[k]});S.v=4;if(S.updatedAt)saveSettings()}
-const newDay=date=>({date,done:{},wakeAt:null,read:{mode:null,title:"",progress:""},focus:{task:"",minutes:0,sessions:[]},timer:null,updatedAt:0});
+const newDay=date=>({date,done:{},wakeAt:null,read:{mode:null,title:"",progress:"",note:""},focus:{task:"",minutes:0,sessions:[]},timer:null,updatedAt:0});
 
 /* ---------- storage: browser copy first, private cloud copy when available ---------- */
 const LS={get(k){try{return JSON.parse(localStorage.getItem("rt:"+k))}catch(e){return null}},set(k,v){try{localStorage.setItem("rt:"+k,JSON.stringify(v))}catch(e){}}};
@@ -217,7 +222,7 @@ function saveSettings(){save("settings",S)}
 function saveDay(){
   save("day-"+D.date,D);
   const done=STEPS.filter(s=>D.done[s.id]).length;
-  L.days[D.date]=Object.assign({},L.days[D.date],{done,total:STEPS.length,am:AM.every(id=>D.done[id]),focus:Math.round(D.focus.minutes),wake:D.wakeAt,book:D.read.title||"",mode:D.read.mode});
+  L.days[D.date]=Object.assign({},L.days[D.date],{done,total:STEPS.length,am:AM.every(id=>D.done[id]),focus:Math.round(D.focus.minutes),wake:D.wakeAt,book:D.read.title||"",mode:D.read.mode,note:!!(D.read.note||"").trim()});
   save("log",L);
 }
 
@@ -271,7 +276,7 @@ function stepBody(s){
     case "goal":return `<div class="callout"><span class="ic">✍️</span><div>${S.goalText?`<div class="goal-text">${esc(S.goalText)}</div><div class="muted">노트에 100번 쓰고 체크해요.</div>`:`노트에 목표를 100번 쓰고 체크해요. <a href="#" data-act="openSettings">목표 문장 적어두기 →</a>`}</div></div>`+doneBtn("✓ 100번 다 썼어요");
     case "meditate":return `<div class="callout purple"><span class="ic">🧘</span><div>명상 영상을 켜고, 타이머도 같이 시작해요. 끝나면 종이 울려요.</div></div>${S.meditateUrl?`<div class="row"><a class="btn" href="${esc(S.meditateUrl)}" target="_blank" rel="noopener">▶️ 명상 영상 켜기 (유튜브)</a></div>`:""}`+timerBlock(stepMin(s),`<button class="btn ghost" data-act="done" data-id="${s.id}">${D.done[s.id]?"↩︎ 해제":"타이머 없이 완료"}</button>`);
     case "stretch":return `<div class="callout green"><span class="ic">🏃</span><div>${stepMin(s)}분 이상 몸을 움직여요. 타이머가 끝나도 더 해도 좋아요!</div></div>`+timerBlock(stepMin(s),`<button class="btn ghost" data-act="done" data-id="${s.id}">${D.done[s.id]?"↩︎ 해제":"타이머 없이 완료"}</button>`);
-    case "read":{const r=D.read;const pastDays=Object.keys(L.days).filter(k=>k!==D.date&&L.days[k].memo).sort().reverse();
+    case "read":{const r=D.read;const pastDays=Object.keys(L.days).filter(k=>k!==D.date&&(L.days[k].memo||L.days[k].note)).sort().reverse();
       return `<div><div class="label">오늘은 어떻게 읽나요?</div><div class="chips">
           <button class="btn chip" data-act="mode" data-mode="paper" aria-pressed="${r.mode==="paper"}">📖 종이책</button>
           <button class="btn chip" data-act="mode" data-mode="yes24" aria-pressed="${r.mode==="yes24"}">📱 YES24 앱</button>
@@ -281,12 +286,13 @@ function stepBody(s){
         ${timerBlock(stepMin(s),`<button class="btn ghost" data-act="done" data-id="${s.id}">${D.done[s.id]?"↩︎ 해제":"타이머 없이 완료"}</button>`)}
         <div><div class="memo-tools">
             <span class="label" style="margin:0 6px 0 0">🖊 독서 메모</span>
-            <button class="btn tool" data-act="tool" data-tool="pen" aria-pressed="${pen.tool==="pen"}">✏️ 펜</button>
+            <div class="tabs" role="group" aria-label="메모 방식"><button data-act="memoTab" data-tab="pen" aria-pressed="${memoTab==="pen"}">✍️ 손글씨</button><button data-act="memoTab" data-tab="text" aria-pressed="${memoTab==="text"}">⌨️ 텍스트${(r.note||"").trim()?" ·":""}</button></div>
+            ${memoTab==="pen"?`<button class="btn tool" data-act="tool" data-tool="pen" aria-pressed="${pen.tool==="pen"}">✏️ 펜</button>
             <button class="btn tool" data-act="tool" data-tool="eraser" aria-pressed="${pen.tool==="eraser"}">🩹 지우개</button>
             ${INKS.map(c=>`<button class="swatch" data-act="ink" data-ink="${c}" style="background:${c}" aria-label="펜 색" aria-pressed="${pen.ink===c&&pen.tool==="pen"}"></button>`).join("")}
-            <button class="btn ghost danger" data-act="clear" id="clearBtn">🗑 전체 지우기</button>
+            <button class="btn ghost danger" data-act="clear" id="clearBtn">🗑 전체 지우기</button>`:""}
             <span class="save-state" id="memoState"></span></div>
-          <div class="paper" id="memoSlot" style="margin-top:8px"></div>
+          ${memoTab==="pen"?`<div class="paper" id="memoSlot" style="margin-top:8px"></div>`:`<div class="paper" style="margin-top:8px"><textarea id="f-note" data-bind="read.note" placeholder="기억하고 싶은 문장, 생각을 적어요 📖">${esc(r.note||"")}</textarea></div>`}
           ${pastDays.length?`<div class="row" style="margin-top:10px"><label style="flex:1;min-width:200px"><div class="label">🗂 지난 독서 메모 보기</div><select id="pastMemo" data-act-change="past"><option value="">날짜 고르기</option>${pastDays.map(k=>`<option value="${k}">${k.slice(5).replace("-","/")} · ${esc(L.days[k].book||"제목 없음")}</option>`).join("")}</select></label></div><div id="pastView"></div>`:""}
         </div>`}
     case "focus":{const goal=Number(S.focusGoal)||120,m=D.focus.minutes,pct=Math.min(100,m/goal*100);const T=D.timer,mine=T&&T.id==="focus",run=mine&&T.endAt;
@@ -347,6 +353,7 @@ function renderStats(){
 /* ---------- handwriting canvas ---------- */
 const INKS=["#2b2a27","#2a5fb0","#c0453c"];
 const pen={tool:"pen",ink:INKS[0]};
+let memoTab=(()=>{try{return localStorage.getItem("rt:memoTab")||"pen"}catch(e){return "pen"}})();
 const cv=document.createElement("canvas");const cx=cv.getContext("2d");
 let hasInk=false,penSeen=false,drawing=false,last=null,memoLoadedFor=null;
 function sizeCanvas(){const w=cv.parentElement?cv.parentElement.clientWidth:0;if(!w)return;const dpr=Math.min(2,window.devicePixelRatio||1);const W=Math.round(w*dpr),H=Math.round(380*dpr);
@@ -385,6 +392,7 @@ document.addEventListener("click",e=>{const el=e.target.closest("[data-act]");if
     case "stopFocus":stopFocus();break;
     case "wake":unlockAudio();D.wakeAt=Date.now();saveDay();toast("☀️ 좋은 아침! 드림보드 루틴부터 시작해요");render();break;
     case "mode":D.read.mode=el.dataset.mode;saveDay();render();break;
+    case "memoTab":memoTab=el.dataset.tab;try{localStorage.setItem("rt:memoTab",memoTab)}catch(e){}render();if(memoTab==="text"){const t=$("#f-note");if(t)t.focus()}break;
     case "tool":pen.tool=el.dataset.tool;render();break;
     case "ink":pen.tool="pen";pen.ink=el.dataset.ink;render();break;
     case "clear":if(Date.now()-clearArm<3000){clearArm=0;cx.clearRect(0,0,cv.width,cv.height);hasInk=false;saveMemo();render()}else{clearArm=Date.now();el.textContent="한 번 더 누르면 다 지워져요";setTimeout(()=>{if(el.isConnected)el.textContent="🗑 전체 지우기"},3000)}break;
@@ -394,8 +402,8 @@ document.addEventListener("input",e=>{const b=e.target.dataset.bind,s=e.target.d
   if(b){const [o,k]=b.split(".");D[o][k]=e.target.value;saveDay()}
   if(s){S[s]=e.target.type==="number"?Number(e.target.value):e.target.value;saveSettings()}});
 document.addEventListener("change",async e=>{if(e.target.id==="pastMemo"){const k=e.target.value,v=$("#pastView");if(!k){v.innerHTML="";return}
-  const rec=newer(LS.get("memo-"+k),await rget("memo-"+k));const x=L.days[k]||{};
-  v.innerHTML=rec&&rec.img?`<div class="muted" style="margin:8px 0 4px">${k} · ${x.mode==="yes24"?"📱 YES24":x.mode==="paper"?"📖 종이책":""} ${esc(x.book||"")}</div><div class="paper"><img src="${rec.img}" alt="${k} 독서 메모"></div>`:'<p class="muted">이 날의 메모를 찾지 못했어요.</p>'}
+  const rec=newer(LS.get("memo-"+k),await rget("memo-"+k));const x=L.days[k]||{};const note=((LS.get("day-"+k)||{}).read||{}).note||"";
+  v.innerHTML=(rec&&rec.img)||note.trim()?`<div class="muted" style="margin:8px 0 4px">${k} · ${x.mode==="yes24"?"📱 YES24":x.mode==="paper"?"📖 종이책":""} ${esc(x.book||"")}</div>${note.trim()?`<div class="paper" style="margin-bottom:8px"><div class="note-view">${esc(note)}</div></div>`:""}${rec&&rec.img?`<div class="paper"><img src="${rec.img}" alt="${k} 독서 메모"></div>`:""}`:'<p class="muted">이 날의 메모를 찾지 못했어요.</p>'}
   if(e.target.dataset.set)render()});
 function fillSettings(){Object.keys(DEFAULT_SET).forEach(k=>{const i=document.getElementById("s-"+k);if(i)i.value=S[k]??""})}
 window.addEventListener("resize",()=>sizeCanvas());
